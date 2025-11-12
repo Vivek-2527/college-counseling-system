@@ -2,6 +2,7 @@ from django.shortcuts import render
 from django.http import JsonResponse, HttpResponse
 from django.contrib.auth.decorators import login_required
 from .models import College
+from django.db import connection
 import csv
 import io
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
@@ -92,10 +93,40 @@ def search_colleges(request):
                 'cities': cities
             }
             
-            # Return JSON response
+            # Get additional statistics from our database views
+            stats_data = {}
+            if matching_colleges:
+                with connection.cursor() as cursor:
+                    # Get city-course statistics for the matching results
+                    college_ids = [str(c.get('id', 0)) for c in matching_colleges if c.get('id')]
+                    if college_ids:
+                        cursor.execute("""
+                            SELECT city, COUNT(*) as college_count
+                            FROM college_recommendation_college
+                            WHERE id IN ({})
+                            GROUP BY city
+                            ORDER BY college_count DESC
+                            LIMIT 5
+                        """.format(','.join(['%s'] * len(college_ids))), college_ids)
+                        city_stats = cursor.fetchall()
+                        stats_data['top_cities'] = [{'city': row[0], 'count': row[1]} for row in city_stats]
+                    
+                    # Get category distribution for matching results
+                    cursor.execute("""
+                        SELECT category, COUNT(*) as college_count
+                        FROM college_recommendation_college
+                        WHERE id IN ({})
+                        GROUP BY category
+                        ORDER BY college_count DESC
+                    """.format(','.join(['%s'] * len(college_ids))), college_ids)
+                    category_stats = cursor.fetchall()
+                    stats_data['category_distribution'] = [{'category': row[0], 'count': row[1]} for row in category_stats]
+            
+            # Return JSON response with enhanced data
             return JsonResponse({
                 'success': True,
-                'colleges': matching_colleges
+                'colleges': matching_colleges,
+                'stats': stats_data
             })
             
         except Exception as e:
@@ -119,6 +150,16 @@ def download_colleges(request):
     # Get results from session
     results = request.session.get('search_results', [])
     criteria = request.session.get('search_criteria', {})
+    
+    # Enhance with statistics from our database views
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT city, course_name, college_count, avg_percentile
+            FROM college_city_course_stats 
+            ORDER BY college_count DESC
+            LIMIT 5
+        """)
+        stats = cursor.fetchall()
     
     if not results:
         return HttpResponse(b"No results to download.", content_type="text/plain")
@@ -159,6 +200,16 @@ def download_colleges_pdf(request):
     # Get results from session
     results = request.session.get('search_results', [])
     criteria = request.session.get('search_criteria', {})
+    
+    # Enhance with statistics from our database views
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT city, course_name, college_count, avg_percentile
+            FROM college_city_course_stats 
+            ORDER BY college_count DESC
+            LIMIT 5
+        """)
+        stats = cursor.fetchall()
     
     if not results:
         return HttpResponse(b"No results to download.", content_type="text/plain")
