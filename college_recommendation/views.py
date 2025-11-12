@@ -71,6 +71,7 @@ def search_colleges(request):
             matching_colleges = []
             for college in colleges_query:
                 matching_colleges.append({
+                    'id': college.id,  # Add ID for statistics tracking
                     'college_code': college.college_code,
                     'college_name': college.college_name,
                     'course_code': college.course_code,
@@ -98,7 +99,7 @@ def search_colleges(request):
             if matching_colleges:
                 with connection.cursor() as cursor:
                     # Get city-course statistics for the matching results
-                    college_ids = [str(c.get('id', 0)) for c in matching_colleges if c.get('id')]
+                    college_ids = [str(c['id']) for c in matching_colleges]
                     if college_ids:
                         cursor.execute("""
                             SELECT city, COUNT(*) as college_count
